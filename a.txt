@@ -1,0 +1,3 @@
+export PATH="$HOME/qemu-7.0.0/build/:$PATH"
+export PATH="$HOME/qemu-7.0.0/build/riscv64-softmmu:$PATH"
+export PATH="$HOME/qemu-7.0.0/build/riscv64-linux-user:$PATH"
