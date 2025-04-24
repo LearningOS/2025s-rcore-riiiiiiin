@@ -1,5 +1,6 @@
 //! Process management syscalls
-use crate::task::{change_program_brk, exit_current_and_run_next, suspend_current_and_run_next};
+use crate::{mm::{translated_usize_buffer, PageTable, VirtAddr}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, get_syscall_count}, timer::get_time_us};
+use core::mem::size_of;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -25,16 +26,66 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    let us = get_time_us();
+    let mut buffer = translated_usize_buffer(current_user_token(), ts as *const usize, size_of::<TimeVal>());
+    match buffer.len(){
+        1 => {
+            // the two words are in the same page
+            buffer[0][0] = us / 1_000_000;
+            buffer[0][1] = us % 1_000_000;
+        }
+        2 => {
+            println!("{}", us);
+            // they are splitted
+            buffer[0][0] = us / 1_000_000;
+            buffer[1][0] = us % 1_000_000;
+        }
+        _ => {
+            panic!("sys_get_time got wrong number of buffer slices")
+        }
+    }
+    0
 }
 
 /// TODO: Finish sys_trace to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    match trace_request{
+        0 => {
+            let va = VirtAddr::from(id);
+            let vpn = va.floor();
+            let pt = PageTable::from_token(current_user_token());
+            let pte = pt.translate(vpn);
+            if let Some(pte) = pte {
+                if pte.is_valid() && pte.readable() && pte.is_user(){
+                    let ppn = pte.ppn();
+                    return ppn.get_bytes_array()[va.page_offset()].into();
+                }
+            }
+            -1
+        }
+        1 => {
+            let va = VirtAddr::from(id);
+            let vpn = va.floor();
+            let pt = PageTable::from_token(current_user_token());
+            let pte = pt.translate(vpn);
+            if let Some(pte) = pte{
+                if pte.is_valid() && pte.writable() && pte.is_user(){
+                    let ppn = pte.ppn();
+                    ppn.get_bytes_array()[va.page_offset()] = data as u8;
+                    return 0;
+                }
+            }
+            -1
+        }
+        2 => {
+            get_syscall_count(id) as isize
+        }
+        _ => -1
+    }
 }
 
 // YOUR JOB: Implement mmap.

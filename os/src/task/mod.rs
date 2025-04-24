@@ -20,7 +20,7 @@ use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
+pub use task::{TaskControlBlock, TaskStatus, SyscallCount};
 
 pub use context::TaskContext;
 
@@ -153,6 +153,20 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Succeeds the syscall counter for current
+    fn succeed_syscall_count(&self, syscall_id : usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_count.succeed(syscall_id);
+    }
+    
+    /// Gets the syscall counter for current
+    fn get_syscall_count(&self, syscall_id : usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_count.get(syscall_id)
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +215,14 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Succeeds the syscall counter for current
+pub fn succeed_syscall_count(syscall_id : usize) {
+    TASK_MANAGER.succeed_syscall_count(syscall_id);
+}
+
+/// Gets the syscall counter for current
+pub fn get_syscall_count(syscall_id : usize) -> usize{
+    TASK_MANAGER.get_syscall_count(syscall_id)
 }

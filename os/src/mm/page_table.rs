@@ -70,6 +70,10 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         (self.flags() & PTEFlags::X) != PTEFlags::empty()
     }
+    /// The page pointered by page table entry is UMode?
+    pub fn is_user(&self) -> bool {
+        (self.flags() & PTEFlags::U) != PTEFlags::empty()
+    }
 }
 
 /// page table structure
@@ -174,6 +178,31 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
         } else {
             v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);
+        }
+        start = end_va.into();
+    }
+    v
+}
+
+/// Translate&Copy a ptr[usize] array with LENGTH len to a mutable usize Vec through page table
+/// Assumed ptr and len are 8 byte aligned
+pub fn translated_usize_buffer(token: usize, ptr: *const usize, len: usize) -> Vec<&'static mut [usize]> {
+    let page_table = PageTable::from_token(token);
+    let mut start = ptr as usize;
+    let end = start + len;
+    assert!(start % 8 == 0 && end % 8 == 0);
+    let mut v = Vec::new();
+    while start < end {
+        let start_va = VirtAddr::from(start);
+        let mut vpn = start_va.floor();
+        let ppn = page_table.translate(vpn).unwrap().ppn();
+        vpn.step();
+        let mut end_va: VirtAddr = vpn.into();
+        end_va = end_va.min(VirtAddr::from(end));
+        if end_va.page_offset() == 0 {
+            v.push(&mut ppn.get_usize_array()[start_va.page_offset() / 8..]);
+        } else {
+            v.push(&mut ppn.get_usize_array()[start_va.page_offset() / 8..end_va.page_offset() / 8]);
         }
         start = end_va.into();
     }
