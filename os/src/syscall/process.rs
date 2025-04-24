@@ -1,5 +1,5 @@
 //! Process management syscalls
-use crate::{mm::{translated_usize_buffer, PageTable, VirtAddr}, task::{change_program_brk, current_user_token, exit_current_and_run_next, suspend_current_and_run_next, get_syscall_count}, timer::get_time_us};
+use crate::{config::PAGE_SIZE, mm::{translated_usize_buffer, MapPermission, PageTable, VirtAddr}, task::{change_program_brk, current_user_token, exit_current_and_run_next, get_syscall_count, insert_framed_area_for_current, suspend_current_and_run_next}, timer::get_time_us};
 use core::mem::size_of;
 
 #[repr(C)]
@@ -89,14 +89,46 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    trace!("kernel: sys_mmap");
+    let start_addr = VirtAddr::from(start);
+    if !start_addr.aligned() {
+        return -1;
+    }
+    if (prot & 0x7 == 0) || (prot & !0x7 != 0) {
+        return -1;
+    }
+    if len == 0 {
+        return 0;
+    }
+    
+    let page_table = PageTable::from_token(current_user_token());
+    let mut cur = start;
+    let end = cur + len;
+    while cur < end {
+        let vpn = VirtAddr::from(cur).floor();
+        if let Some(_) = page_table.translate(vpn){
+            println!("{}, {:?}", cur, vpn);
+            return -1;
+        }
+        cur += PAGE_SIZE;
+    }
+
+    let permission = MapPermission::from_bits((prot<<1) as u8).unwrap() | MapPermission::U;
+    insert_framed_area_for_current(VirtAddr::from(start), VirtAddr::from(end), permission);
+    0
 }
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    let start_addr = VirtAddr::from(_start);
+    if !start_addr.aligned() {
+        return -1;
+    }
+    if _len == 0 {
+        return 0;
+    }
     -1
 }
 /// change data segment size
