@@ -1,5 +1,5 @@
 //! Process management syscalls
-use crate::{config::PAGE_SIZE, mm::{translated_usize_buffer, MapPermission, PageTable, VirtAddr}, task::{change_program_brk, current_user_token, exit_current_and_run_next, get_syscall_count, insert_framed_area_for_current, suspend_current_and_run_next}, timer::get_time_us};
+use crate::{config::PAGE_SIZE, mm::{translated_usize_buffer, MapPermission, PageTable, VirtAddr}, task::{change_program_brk, current_user_token, exit_current_and_run_next, get_syscall_count, insert_framed_area_for_current, suspend_current_and_run_next, unmap_for_current}, timer::get_time_us};
 use core::mem::size_of;
 
 #[repr(C)]
@@ -104,12 +104,14 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     
     let page_table = PageTable::from_token(current_user_token());
     let mut cur = start;
-    let end = cur + len;
+    let end = start + len;
     while cur < end {
         let vpn = VirtAddr::from(cur).floor();
-        if let Some(_) = page_table.translate(vpn){
+        if let Some(pte) = page_table.translate(vpn){
             println!("{}, {:?}", cur, vpn);
-            return -1;
+            if pte.is_valid() {
+                return -1;
+            }
         }
         cur += PAGE_SIZE;
     }
@@ -120,16 +122,16 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    let start_addr = VirtAddr::from(_start);
+    let start_addr = VirtAddr::from(start);
     if !start_addr.aligned() {
         return -1;
     }
-    if _len == 0 {
+    if len == 0 {
         return 0;
     }
-    -1
+    unmap_for_current(start_addr, VirtAddr::from(start + len))
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

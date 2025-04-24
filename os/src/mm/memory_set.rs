@@ -262,6 +262,54 @@ impl MemorySet {
             false
         }
     }
+
+    /// Unmap framed pages
+    /// Only remove when all are within one area, thus safe
+    /// Assume start aligned to page, and len > 0
+    pub fn munmap(&mut self, start_va: VirtAddr, end_va : VirtAddr) -> isize {
+        let start_vpn = start_va.floor();
+        let end_vpn = end_va.ceil();
+        // println!("{:?}, {:?}", start_vpn, end_vpn);
+        for i in 0..self.areas.len() {
+            if self.areas[i].map_type != MapType::Framed {continue;}
+            let old_start = self.areas[i].vpn_range.get_start();
+            let old_end = self.areas[i].vpn_range.get_end();
+            // println!("{:?}, {:?}", old_start, old_end);
+            if old_start <= start_vpn && old_end >= end_vpn {
+                // println!("FUCK YOUR MOTHER");
+                // l =, r =
+                if old_start == start_vpn && old_end == end_vpn {
+                    // println!("FUCK YOUR GRAND MOTHER");
+                    let area = &mut self.areas.remove(i);
+                    // println!("FUCK YOUR GRAND GRAND MOTHER");
+                    area.unmap(&mut self.page_table);
+                    // println!("FUCK YOUR GRAND GRAND GRAND MOTHER");
+                }
+
+                // l =, r <
+                else if old_start == start_vpn {
+                    let area = &mut self.areas[i];
+                    area.shrink_to(&mut self.page_table, end_vpn);
+                }
+
+                // l >, r =
+                else if old_end == end_vpn {
+                    let area = &mut self.areas[i];
+                    area.shrink_to_start(&mut self.page_table, start_vpn);
+                }
+
+                // l >, r <
+                else {
+                    let area = &mut self.areas[i];
+                    let right = area.split(end_vpn);
+                    area.shrink_to(&mut self.page_table, start_vpn);
+                    self.areas.push(right);
+                }
+                return 0;
+            }
+        }
+        return -1;
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -286,6 +334,19 @@ impl MapArea {
             map_type,
             map_perm,
         }
+    }
+    pub fn split(&mut self, mid: VirtPageNum) -> Self {
+        let mut right = Self {
+            vpn_range : VPNRange::new(mid, self.vpn_range.get_end()),
+            data_frames : BTreeMap::new(),
+            map_type : self.map_type,
+            map_perm : self.map_perm
+        };
+        self.vpn_range = VPNRange::new(self.vpn_range.get_start(), mid);
+        for vpn in right.vpn_range{
+            right.data_frames.insert(vpn, self.data_frames.remove(&vpn).unwrap());
+        }
+        right
     }
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
@@ -326,6 +387,13 @@ impl MapArea {
             self.unmap_one(page_table, vpn)
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
+    }
+    #[allow(unused)]
+    pub fn shrink_to_start(&mut self, page_table: &mut PageTable, new_start: VirtPageNum) {
+        for vpn in VPNRange::new(self.vpn_range.get_start(), new_start) {
+            self.unmap_one(page_table, vpn)
+        }
+        self.vpn_range = VPNRange::new(new_start, self.vpn_range.get_end());
     }
     #[allow(unused)]
     pub fn append_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
